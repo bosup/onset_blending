@@ -1,0 +1,148 @@
+# ==============================================================================
+# Spec file for IMD Rainfall Data at the 2 degree x 2 degree level
+# imd_clim_mok_date.yml -- variation of imd.yml using climatological MOK date (June 1) instead of variable one
+# Feeds into 1_process_raw_nc_files.R and 2_build_climatology.R
+# ==============================================================================
+
+type: "ground_truth_rainfall"
+
+input:
+  nc_folder: "/Users/bodong/Code/project/ROMP/data/ENACTS"
+
+  # Identify input filenames + extract relevant year
+  # Matches filenames like data_2000.nc
+  file_regex: "^[0-9]{4}\\.nc$"
+  #file_regex: "^[0-9]{4}\\.nc$"
+
+  # Main NetCDF variable to read
+  value_col: "precip"
+
+  # Parallelism (optional)
+  parallel: false
+  workers: 10
+
+# Dimensions must follow the form: lat, lon, time.
+# The script attempts to match common names (e.g., "latitude"), but explicit mapping is recommended.
+dimensions:
+  rename:
+    latitude: "lat"
+    longitude: "lon"
+    TIME: "time"
+    time: "time"
+
+output:
+  out_dir: "Monsoon_Data/Processed_Data/Models"
+  # basename derived from spec_id (imd_clim_mok_date)
+
+
+options:
+  window: 3                      # Onset rolling window length (days)
+  onset_definition:
+    wet_day_min_mm: 1.0          # wet day threshold
+    follow_days: 0              # days after trigger to check (21 for Ethiopia ICPAC definition)
+
+    dry_spell:
+      mode: consecutive_dry      # or: window_sum
+      # --- consecutive_dry ---
+      min_dry_days: 7
+      dry_day_min_mm: 1.0        # optional, defaults to wet_day_min_mm
+
+      # --- window_sum (Moron-Robertson definition) ---
+      # mode: window_sum
+      # sum_window: 10
+      # sum_min_mm: 5.0
+      
+
+  # date cutoff (ignore data before this date each year)
+  cutoff_month_day: "05-01"
+
+  # Optional year bounds (applied after extracting year from filename)
+  # These need to include training and test years (that separation happens in "climatology_options", below)
+  # min_year: 1900
+  # max_year: 2024
+
+  # ----------------------------
+  # Optional: cell transform (linear combination by id)
+  # ----------------------------
+  # If enabled, regrid the rainfall from a source grid to a target grid
+  # Requires a cell transform file expressing rainfall on each target grid cell as a 
+  # linear combination of rainfall on one or more source grid cells
+  # Cheap version of downscaling. In general we shouldn't do it for ground truth files, only for forecast files.
+  cell_transform_enabled: false
+  #cell_transform_file: "/path/to/cell_transform_weights_long.csv"
+  # Transform file must have: target_id, source_id, weight
+
+thresholds:
+  # Thresholds must match the grid:
+  # - if cell_transform_enabled: thresholds should correspond to target_id grid
+  # - else: thresholds correspond to original grid (id derived from lat/lon)
+  # Supported: CSV/TSV, NetCDF (.nc/.nc4), MATLAB (.mat)
+  file: "Monsoon_Data/reference/thresholds_df.csv"
+
+  # CSV column mapping (ignored for NetCDF/.mat thresholds)
+  lat_col: "lat"
+  lon_col: "lon"
+  thresh_col: "onset_threshold"
+
+  # NetCDF thresholds optional overrides
+  # lat_var: "lat"
+  # lon_var: "lon"
+  # thresh_var: "MWmean"
+
+  # .mat thresholds optional overrides
+  # mat_lat_name: "lat"
+  # mat_lon_name: "lon"
+  # mat_thresh_name: "onset.day.thres"
+
+mok:
+  # Optional. If omitted, mok_date will be NA and MOK restriction is skipped.
+  file: "Monsoon_Data/reference/MOK Onset May.csv"
+  year_col: "Year"
+  day_col: "MOK"
+  # MOK is expressed as "number of days starting on base date" -- in the file we used this is May 1.
+  base_date: "05-01"
+
+filter:
+  # Note: spatial filtering is not currently implemented.
+  # ids: ["21.5_78.5", "22_79"]
+  # cells:
+  #   - {lat: 21.5, lon: 78.5}
+  #   - {lat: 22.0, lon: 79.0}
+
+# ------------------------------------------------------------------------------
+# Climatology Options
+# ------------------------------------------------------
+
+paths:
+  climatology_out_dir: "Monsoon_Data/Processed_Data/Climatology"
+  # default stem used only you don't provide one for a specific climatology
+  climatology_out_stem: "imd_clim_mok_date_clim_issue"
+
+
+  # "test years" are years for which forecasts will be produced
+  # based on the training years
+climatologies:
+  clim:
+    out_stem: "imd_clim_mok_date_clim_issue"
+    onset_col: "mr_onset_day"
+    conditional: true
+    train_year_min: 2000
+    train_year_max: 2022
+    test_year_min: 2000
+    test_year_max: 2022
+    season_start_md: "05-01"
+    issue_end_md: "07-31"
+    forecast_window: 28
+
+
+  clim_unc:
+    out_stem: "imd_clim_mok_date_clim_unc_issue"
+    onset_col: "mr_onset_day"
+    conditional: false
+    train_year_min: 2000
+    train_year_max: 2022
+    test_year_min: 2000
+    test_year_max: 2022
+    season_start_md: "05-01"
+    issue_end_md: "07-31"
+    forecast_window: 28

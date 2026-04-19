@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+# ==============================================================================
+# Script: 2_build_climatology.py
+# ==============================================================================
+# Purpose
+#   Fit per-cell KDE climatology models from historical onset dates and
+#   produce issue-date probability forecasts over within-season date windows.
+#   Supports MULTIPLE climatology runs from a single YAML spec.
+#
+# Usage (run from MO_Forecast_Code/ directory)
+#   python pipelines/prepare_data/2_build_climatology.py --spec_id imd
+#   python pipelines/prepare_data/2_build_climatology.py --spec_id imd --run clim_1965_2024
+# ==============================================================================
+
+import argparse
+import os
+import sys
+import pickle
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+from python.pipelines._shared.read_spec import load_spec, validate_spec
+from python.prepare_data.climatology_utils import (
+    get_paths_clim,
+    get_climatology_options_from_run,
+    read_gt_onset_from_tbl,
+    filter_gt_training,
+    build_issue_grid,
+    compute_all_forecasts,
+)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Build KDE climatology forecasts.")
+    parser.add_argument("-i", "--spec_id", required=True,
+                        help="Spec ID (loads specs/raw_data/<id>.yml)")
+    parser.add_argument("-r", "--run", default=None,
+                        help="Optional: run only one climatology key")
+    args = parser.parse_args()
+
+    spec = load_spec(args.spec_id, "raw_data")
+    spec["id"] = args.spec_id
+
+    def _validate_clim(s):
+        if not s.get("climatologies"):
+            raise ValueError("Missing or empty 'climatologies' in spec.")
+        required = ["train_year_min", "train_year_max", "test_year_min", "test_year_max",
+                    "season_start_md", "issue_end_md"]
+        for nm, co in s["climatologies"].items():
+            miss = [f for f in required if f not in co]
+            if miss:
+                raise ValueError(f"Run '{nm}' missing fields: {', '.join(miss)}")
+            has_fw = co.get("forecast_window") is not None
+            has_hz = co.get("horizons") is not None
+            if not has_fw and not has_hz:
+                raise ValueError(f"Run '{nm}': provide forecast_window or horizons.")
+            if has_fw and has_hz:
+                raise ValueError(f"Run '{nm}': provide only one of forecast_window or horizons.")
+
+    spec = validate_spec(spec, required_paths=["output.out_dir", "climatologies"], checks=[_validate_clim])
+
+    paths = get_paths_clim(spec)
+    gt_wide_path = paths["gt_path"]
+    if not os.path.exists(gt_wide_path):
+        raise FileNotFoundError(f"Ground-truth file not found: {gt_wide_path}")
+
+    with open(gt_wide_path, "rb") as f:
+        gt_wide = pickle.load(f)
+
+    run_keys = list(spec["climatologies"].keys())
+    if args.run is not None:
+        if args.run not in run_keys:
+            raise ValueError(f"Requested --run '{args.run}' not found. Available: {', '.join(run_keys)}")
+        run_keys = [args.run]
+
+    results = []
+    for run_key in run_keys:
+        co = spec["climatologies"][run_key]
+        opt = get_climatology_options_from_run(co)
+
+        gt = read_gt_onset_from_tbl(gt_wide, onset_col=opt["onset_col"])
+        gt_train = filter_gt_training(gt, opt["train_year_min"], opt["train_year_max"])
+
+        issue_grid = build_issue_grid(
+            opt["test_year_min"], opt["test_year_max"],
+            opt["season_start_md"], opt["issue_end_md"],
+        )
+
+        out = compute_all_forecasts(
+            gt_train=gt_train,
+            issue_grid=issue_grid,
+            season_start_md=opt["season_start_md"],
+            forecast_window=opt["forecast_window"],
+            horizons=opt["horizons"],
+            conditional=opt["conditional"],
+            cv_by_year=opt["cv_by_year"],
+        )
+
+        forecast_tbl = out["forecasts"]
+        out_stem = co.get("out_stem") or f"{paths['out_stem']}_{run_key}"
+        out_rds = os.path.join(paths["out_dir"], f"{out_stem}.pkl")
+
+        with open(out_rds, "wb") as f:
+            pickle.dump(forecast_tbl, f)
+
+        print(f"[{run_key}] Wrote: {out_rds}")
+        results.append({"run": run_key, "out_pkl": out_rds})
+
+    return results
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,142 @@
+# =============================================================================
+# .gitignore for et_blending Python pipeline
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Monsoon_Data — ignore all content, but keep empty folder structure via .gitkeep
+# -----------------------------------------------------------------------------
+
+# Raw NetCDF inputs — ignore everything, keep folder
+Monsoon_Data/raw_nc/**
+!Monsoon_Data/raw_nc/**/
+!Monsoon_Data/raw_nc/**/.gitkeep
+
+# Processed data outputs — ignore everything, keep folders
+Monsoon_Data/Processed_Data/**
+!Monsoon_Data/Processed_Data/**/
+!Monsoon_Data/Processed_Data/**/.gitkeep
+
+# Results — ignore everything, keep folders
+Monsoon_Data/results/**
+!Monsoon_Data/results/**/
+!Monsoon_Data/results/**/.gitkeep
+
+# Maps — ignore everything, keep folder
+Monsoon_Data/maps/**
+!Monsoon_Data/maps/**/
+!Monsoon_Data/maps/**/.gitkeep
+
+# evaluation_2025 — ignore all files (out-of-sample data not committed)
+Monsoon_Data/evaluation_2025/**
+!Monsoon_Data/evaluation_2025/**/
+!Monsoon_Data/evaluation_2025/**/.gitkeep
+
+# reference/ and dissemination_cells.csv are intentionally committed as-is
+
+# Belt-and-suspenders: block large data file types repo-wide
+*.nc
+*.nc4
+*.netcdf
+*.pkl
+*.rds
+*.mat
+*.parquet
+
+# Block CSVs everywhere except reference/ (which is explicitly tracked)
+*.csv
+!Monsoon_Data/reference/*.csv
+!Monsoon_Data/dissemination_cells.csv
+
+# -----------------------------------------------------------------------------
+# Python
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.env
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+
+# -----------------------------------------------------------------------------
+# Figures and outputs
+# -----------------------------------------------------------------------------
+figures/
+*.pdf
+*.svg
+*.png
+# Uncomment to keep the test suite plot:
+# !test_onset_results.png
+
+# -----------------------------------------------------------------------------
+# OS and editor files
+# -----------------------------------------------------------------------------
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# Vim
+*.swp
+*.swo
+*.swn
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# PyCharm / JetBrains
+.idea/
+
+# Emacs
+\#*\#
+.#*
+
+# -----------------------------------------------------------------------------
+# Logs and temp files
+# -----------------------------------------------------------------------------
+*.log
+*.tmp
+*.bak
+*.orig
+nohup.out
+
+# PBS/SLURM job outputs
+*.o[0-9]*
+*.e[0-9]*

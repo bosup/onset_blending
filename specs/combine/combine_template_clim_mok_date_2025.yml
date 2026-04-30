@@ -11,14 +11,14 @@ type: "combine_forecasts"
 
 input:
   # onset date output (from 1_process_raw_nc_files.R with type ground_truth_rainfall)
-  ground_truth_wide_rds: "Monsoon_Data/Processed_Data/Models/imd_clim_mok_date_wide.pkl"
+  ground_truth_wide_rds: "Monsoon_Data/Processed_Data/Models/wet_spell/imd_clim_mok_date_wide.pkl"
 
   climatologies:
     clim:
-      rds: "Monsoon_Data/Processed_Data/Climatology/imd_clim_mok_date_clim_issue.pkl"
+      rds: "Monsoon_Data/Processed_Data/Climatology/wet_spell/imd_clim_mok_date_clim_issue.pkl"
       out_prefix: "clim_p_onset"
     clim_unc:
-      rds: "Monsoon_Data/Processed_Data/Climatology/imd_clim_mok_date_clim_unc_issue.pkl"
+      rds: "Monsoon_Data/Processed_Data/Climatology/wet_spell/imd_clim_mok_date_clim_unc_issue.pkl"
       out_prefix: "clim_unc_p_onset"
 
 
@@ -40,7 +40,8 @@ forecasts:
   ngcm:
     max_day: 40
     sources:
-      - file: "Monsoon_Data/Processed_Data/Models/ngcm_wide.pkl"
+      #- file: "Monsoon_Data/Processed_Data/Models/ngcm_wide.pkl"
+      - file: "Monsoon_Data/Processed_Data/Models/wet_spell/gencast_wide.pkl"
         years: "1965:2024"
 
     #constant variables are constant per lat/lon/initialization date
@@ -59,7 +60,7 @@ forecasts:
   aifs:
     max_day: 40
     sources:
-      - file: "Monsoon_Data/Processed_Data/Models/aifs_wide.pkl"
+      - file: "Monsoon_Data/Processed_Data/Models/wet_spell/aifs_wide.pkl"
         years: "1965:2024"
         prob_col: "predicted_prob_clim_mok_date"   # override per-source (optional)
     daily: #add_plus: add a "day_29plus" version which is 1- sum of others. 
@@ -76,6 +77,6 @@ climatology:
   prob_col: "predicted_prob"
 
 output:
-  out_dir: "Monsoon_Data/Processed_Data/Combined"
+  out_dir: "Monsoon_Data/Processed_Data/Combined/wet_spell_aifs_gencast"
   # basename derived from spec_id
 

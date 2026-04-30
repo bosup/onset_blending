@@ -23,7 +23,8 @@ type: "rainfall_forecast"
 
 input:
   # Folder of NetCDF files
-  nc_folder: "/Users/bodong/Code/project/ROMP/data/gencast"
+  #nc_folder: "/Users/bodong/Code/project/ROMP/data/gencast"
+  nc_folder: "/Users/bodong/Code/project/forecast/aifs_ens"
   # Regex used to select files within nc_folder.
   # MUST include a 4-digit year somewhere in the filename for year extraction.
   # Examples matched: "2000.nc", "data_2000.nc"

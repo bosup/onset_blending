@@ -31,7 +31,7 @@ dimensions:
     time: "time"
 
 output:
-  out_dir: "Monsoon_Data/Processed_Data/Models"
+  out_dir: "Monsoon_Data/Processed_Data/Models/wet_spell"
   # basename derived from spec_id (imd_clim_mok_date)
 
 
@@ -39,7 +39,7 @@ options:
   window: 3                      # Onset rolling window length (days)
   onset_definition:
     wet_day_min_mm: 1.0          # wet day threshold
-    follow_days: 0              # days after trigger to check (21 for Ethiopia ICPAC definition)
+    follow_days: 21              # days after trigger to check (21 for Ethiopia ICPAC definition)
 
     dry_spell:
       mode: consecutive_dry      # or: window_sum
@@ -114,7 +114,7 @@ filter:
 # ------------------------------------------------------
 
 paths:
-  climatology_out_dir: "Monsoon_Data/Processed_Data/Climatology"
+  climatology_out_dir: "Monsoon_Data/Processed_Data/Climatology/wet_spell"
   # default stem used only you don't provide one for a specific climatology
   climatology_out_stem: "imd_clim_mok_date_clim_issue"
 
@@ -133,6 +133,7 @@ climatologies:
     season_start_md: "05-01"
     issue_end_md: "07-31"
     forecast_window: 28
+    min_onset_years: 10
 
 
   clim_unc:
@@ -146,3 +147,4 @@ climatologies:
     season_start_md: "05-01"
     issue_end_md: "07-31"
     forecast_window: 28
+    min_onset_years: 10

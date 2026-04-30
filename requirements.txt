@@ -12,4 +12,5 @@ pyproj>=3.5
 shapely>=2.0
 geopandas>=0.13
 tqdm>=4.65
+cartopy>=0.25.0
 KDEpy

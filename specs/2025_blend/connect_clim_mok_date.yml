@@ -1,6 +1,7 @@
 mode: "clim_mok_date"
-input_rds: "Monsoon_Data/Processed_Data/Combined/combine_template_clim_mok_date_2025_combined_wide.pkl"
-output_rds: "Monsoon_Data/Processed_Data/2025_pipeline_input/cv_data_clim_mok_date_new_pipeline.pkl"
+input_rds: "Monsoon_Data/Processed_Data/Combined/wet_spell_aifs_gencast/combine_template_clim_mok_date_2025_combined_wide.pkl"
+#output_rds: "Monsoon_Data/Processed_Data/2025_pipeline_input/cv_data_clim_mok_date_new_pipeline.pkl"
+output_rds: "Monsoon_Data/Processed_Data/pipeline_input/wet_spell_aifs_gencast/cv_data_clim_mok_date_new_pipeline.pkl"
 day_max: 28
 days_per_week: 7
 n_weeks: 4

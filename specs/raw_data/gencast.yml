@@ -1,6 +1,6 @@
 # ==============================================================================
-# Spec for AIFS rainfall forecasts at the 2 degree x 2 degree gird cell level
-# aifs.yml
+# Spec for  NeuralGCM rainfall forecasts (from "ngcm_more" folder) at the 2 degree x 2 degree gird cell level
+# ngcm.yml
 # Feeds into 1_process_raw_nc_files.R
 # ------------------------------------------------------------------------------
 # This YAML feeds the combined "NetCDF -> onset outputs" pipeline.
@@ -23,16 +23,15 @@ type: "rainfall_forecast"
 
 input:
   # Folder of NetCDF files
-  #nc_folder: "/Users/bodong/Code/project/ROMP/data/AIFS"
-  nc_folder: "/Users/bodong/Code/project/forecast/aifs"
-
+  #nc_folder: "/Users/bodong/Code/project/ROMP/data/gencast"
+  nc_folder: "/Users/bodong/Code/project/forecast/gencast"
   # Regex used to select files within nc_folder.
   # MUST include a 4-digit year somewhere in the filename for year extraction.
   # Examples matched: "2000.nc", "data_2000.nc"
   file_regex: ".*\\b(19|20)\\d{2}\\b.*\\.nc$"
 
-  # Main NetCDF variable to read (verify against the NetCDF file structure)
-  value_col: "tp"                 
+  # Main NetCDF variable to read (you'll need to open an nc file to check this)
+  value_col: "tp"
 
   # --- Forecast-only wide settings ---
   # Name AFTER dimensions.rename is applied (defaults in code if omitted)
@@ -43,7 +42,7 @@ input:
 
   # Parallelism
   parallel: true
-  # If parallel: true, number of workers (optional, defaults to 5 otherwise)
+  # If parallel: true, number of workers (optional; defaults to 5)
   workers: 9
 
 dimensions:
@@ -63,7 +62,7 @@ options:
   window: 3                      # Onset rolling window length (days)
   onset_definition:
     wet_day_min_mm: 1.0          # wet day threshold
-    follow_days: 21              # days after trigger to check (21 for Ethiopia ICPAC definition)
+    follow_days: 0              # days after trigger to check (21 for Ethiopia ICPAC definition)
 
     dry_spell:
       mode: consecutive_dry      # or: window_sum
@@ -75,7 +74,6 @@ options:
       # mode: window_sum
       # sum_window: 10
       # sum_min_mm: 5.0
-      
 
   # Forecast-only: keep lead days in [min_day, max_day + window - 1]
   min_day: 1
@@ -146,9 +144,5 @@ mok:
 # via years and thresholds; id-based filtering can be added here if needed.
 # ----------------------------
 filter:
-  # years: [2000, 2001, 2002]
-  # ids: ["21.5_78.5", "22_79"]
-  # OR (if you still want lat/lon filtering pre-id):
-  # cells:
-  #   - {lat: 21.5, lon: 78.5}
-  #   - {lat: 22.0, lon: 79.0}
+  max_number: 30
+  # ensure 30 ensemble members across all runs

@@ -81,6 +81,19 @@ def main():
         gt = read_gt_onset_from_tbl(gt_wide, onset_col=opt["onset_col"])
         gt_train = filter_gt_training(gt, opt["train_year_min"], opt["train_year_max"])
 
+        # Filter out cells with too few onset observations to fit a reliable KDE
+        min_onset_years = co.get("min_onset_years", 10)  # configurable per run in the spec
+        onset_counts = gt_train.groupby("id")["onset_day"].count()
+        valid_ids = onset_counts[onset_counts >= min_onset_years].index
+        excluded = onset_counts[onset_counts < min_onset_years]
+        if len(excluded) > 0:
+            print(f"[{run_key}] Excluding {len(excluded)} cells with fewer than {min_onset_years} onset years:")
+#            print(excluded.sort_values().to_string())
+        gt_train = gt_train[gt_train["id"].isin(valid_ids)]
+        if gt_train.empty:
+            raise ValueError(f"[{run_key}] No cells remain after min_onset_years filter.")
+        # End of bug fix
+
         issue_grid = build_issue_grid(
             opt["test_year_min"], opt["test_year_max"],
             opt["season_start_md"], opt["issue_end_md"],

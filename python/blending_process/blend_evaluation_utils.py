@@ -10,6 +10,7 @@
 
 import re
 import os
+import patsy
 import pickle
 import warnings
 import numpy as np
@@ -82,28 +83,69 @@ def input_rds_from_cutoff(cutoff_mode, resolution=""):
 # Formula expansion
 # ---------------------------------------------------------------------------
 
+#def expand_formula_str(formula_str):
+#    """
+#    Expand formula shortcuts in a formula string.
+#    Terms containing '_qx' expand to '_week1'..'_week4'.
+#    Returns the expanded formula string.
+#    """
+#    if "~" in formula_str:
+#        lhs, rhs = formula_str.split("~", 1)
+#        lhs, rhs = lhs.strip(), rhs.strip()
+#    else:
+#        lhs, rhs = "", formula_str.strip()
+#
+#    terms = [t.strip() for t in rhs.split("+")]
+#    expanded = []
+#    for term in terms:
+#        if "_qx" in term:
+#            for i in range(1, 5):
+#                expanded.append(term.replace("_qx", f"_week{i}"))
+#        else:
+#            expanded.append(term)
+#
+#    new_rhs = " + ".join(expanded)
+#    return f"{lhs} ~ {new_rhs}" if lhs else new_rhs
+
+
+# AFTER
 def expand_formula_str(formula_str):
     """
     Expand formula shortcuts in a formula string.
-    Terms containing '_qx' expand to '_week1'..'_week4'.
+    1. Terms containing '_qx' expand to '_week1'..'_week4'.
+    2. '*' terms are expanded R/Wilkinson-style: a*b*c -> a + b + c + a:b + a:c + b:c + a:b:c
     Returns the expanded formula string.
     """
+    import itertools
+
     if "~" in formula_str:
         lhs, rhs = formula_str.split("~", 1)
         lhs, rhs = lhs.strip(), rhs.strip()
     else:
         lhs, rhs = "", formula_str.strip()
 
-    terms = [t.strip() for t in rhs.split("+")]
-    expanded = []
-    for term in terms:
+    # Step 1: split on '+' to get top-level terms, then expand _qx -> _week1.._week4
+    raw_terms = [t.strip() for t in rhs.split("+")]
+    qx_expanded = []
+    for term in raw_terms:
         if "_qx" in term:
             for i in range(1, 5):
-                expanded.append(term.replace("_qx", f"_week{i}"))
+                qx_expanded.append(term.replace("_qx", f"_week{i}"))
         else:
-            expanded.append(term)
+            qx_expanded.append(term)
 
-    new_rhs = " + ".join(expanded)
+    # Step 2: expand Wilkinson '*' into main effects + all interactions using ':'
+    final_terms = []
+    for term in qx_expanded:
+        if "*" in term:
+            vars_ = [v.strip() for v in term.split("*")]
+            for r in range(1, len(vars_) + 1):
+                for combo in itertools.combinations(vars_, r):
+                    final_terms.append(":".join(combo))
+        else:
+            final_terms.append(term)
+
+    new_rhs = " + ".join(final_terms)
     return f"{lhs} ~ {new_rhs}" if lhs else new_rhs
 
 
@@ -162,6 +204,85 @@ def build_formulas_from_spec(spec, cutoff_mode):
 
     return formulas
 
+
+def print_formula_summary(spec, cutoff_mode):
+    """
+    Print a human-readable summary of all blending models: the yml shorthand,
+    the fully expanded formula, and the exact list of predictor columns used.
+
+    Call this at the start of 1_blend_evaluation.py to make the models
+    transparent before any fitting happens.
+    """
+    formulas = build_formulas_from_spec(spec, cutoff_mode)
+    formula_cfg = (spec.get("models") or {}).get("formulas") or {}
+
+    width = 70
+    print()
+    print("=" * width)
+    print("  BLENDING MODELS — formula expansion summary")
+    print("=" * width)
+
+    for model_name, expanded in formulas.items():
+        yml_text = None
+        if model_name in formula_cfg:
+            yml_text = formula_cfg[model_name].get("text")
+
+        feature_cols = _parse_formula_cols(expanded)
+
+        print()
+        print(f"  Model: {model_name}")
+        print(f"  {'-' * (width - 2)}")
+
+        if yml_text:
+            print(f"  yml shorthand:")
+            print(f"    {yml_text}")
+            print()
+
+        print(f"  Expanded formula:")
+        lhs, rhs = expanded.split("~", 1)
+        terms = [t.strip() for t in rhs.split("+")]
+        lines = []
+        line = ""
+        for i, t in enumerate(terms):
+            sep = " + " if i < len(terms) - 1 else ""
+            if len(line) + len(t) + len(sep) > 60 and line:
+                lines.append(line)
+                line = t + sep
+            else:
+                line += t + sep
+        if line:
+            lines.append(line)
+        indent = "    " + " " * (len(lhs.strip()) + 3)
+        print(f"    {lhs.strip()} ~  {lines[0]}")
+        for l in lines[1:]:
+            print(f"    {indent}{l}")
+
+        print()
+
+# BEFORE
+        #print(f"  Predictor columns used ({len(feature_cols)}):")
+        #groups = {}
+        #for col in feature_cols:
+        #    root = re.sub(r"_week\d$", "", col)
+        #    groups.setdefault(root, []).append(col)
+        #for root, cols in groups.items():
+        #    weeks = ", ".join(c.split("_week")[-1] for c in cols)
+        #    scale = "(logit)" if "clim_mr" in root else "(mm)"
+        #    print(f"    {root}_week[{weeks}]  {scale}")
+
+# AFTER
+        lhs_exp, rhs_exp = expanded.split("~", 1)
+        all_terms = [t.strip() for t in rhs_exp.split("+")]
+        print(f"  Predictor terms used ({len(all_terms)}):")
+        for term in all_terms:
+            scale = "(logit)" if "clim_mr" in term else ("(interaction)" if ":" in term else "(mm)")
+            print(f"    {term}  {scale}")
+
+    print()
+    print("=" * width)
+    print(f"  Total models: {len(formulas)}")
+    print("=" * width)
+    print()
 
 # ---------------------------------------------------------------------------
 # Raw and calibrated predictions
@@ -375,6 +496,46 @@ def make_calibrated_preds_from_wide(wide_df, forecast_name, variant,
 # ---------------------------------------------------------------------------
 # Multinomial CV
 # ---------------------------------------------------------------------------
+import itertools
+
+def expand_wilkinson(formula_str, df):
+    """
+    Expand R-style Wilkinson formula: a*b*c -> a + b + c + a:b + a:c + b:c + a:b:c
+    Returns (feature_cols, X) where X is the design matrix as a DataFrame.
+    """
+    if "~" in formula_str:
+        rhs = formula_str.split("~", 1)[1].strip()
+    else:
+        rhs = formula_str.strip()
+
+    # Split top-level terms on '+'
+    top_terms = [t.strip() for t in rhs.split("+")]
+
+    all_cols = {}
+    for term in top_terms:
+        if "*" in term:
+            # Get the base variable names
+            vars_ = [v.strip() for v in term.split("*")]
+            # Generate all subsets of size 1..n
+            for r in range(1, len(vars_) + 1):
+                for combo in itertools.combinations(vars_, r):
+                    col_name = ":".join(combo)
+                    if len(combo) == 1:
+                        all_cols[col_name] = df[combo[0]]
+                    else:
+                        # Product of all variables in combo
+                        product = df[combo[0]].copy()
+                        for v in combo[1:]:
+                            product = product * df[v]
+                        all_cols[col_name] = product
+        else:
+            # Plain additive term
+            if term in df.columns:
+                all_cols[term] = df[term]
+
+    X = pd.DataFrame(all_cols, index=df.index)
+    return list(X.columns), X
+
 
 def _make_multinom_clf():
     """
@@ -394,7 +555,9 @@ def _make_multinom_clf():
     return LogisticRegression(**kwargs)
 
 
-def _fit_predict_multinom(train, test, feature_cols, outcome_col="outcome"):
+#def _fit_predict_multinom(train, test, feature_cols, outcome_col="outcome", return_clf=False):
+def _fit_predict_multinom(train, test, feature_cols, outcome_col="outcome", return_clf=False,
+                          formula_str=None):
     """Fit sklearn multinomial logistic regression and return predicted probs.
 
     Fixes vs original:
@@ -402,29 +565,64 @@ def _fit_predict_multinom(train, test, feature_cols, outcome_col="outcome"):
     - max_iter increased to 5000 to match R nnet convergence behavior
     - Compatible with both sklearn <1.5 and >=1.5 (multi_class kwarg removed in 1.5)
     """
-    classes = sorted(train[outcome_col].unique())
+    #classes = sorted(train[outcome_col].unique())
+    classes = sorted([c for c in train[outcome_col].unique() if isinstance(c, str)])
     if len(classes) < 2:
-        return None
+        #return None
+        return (None, None) if return_clf else None 
 
-    X_tr = train[feature_cols].values.astype(float)
+    #X_tr = train[feature_cols].values.astype(float)
+    #y_tr = train[outcome_col].values
+    #X_te = test[feature_cols].values.astype(float)
+
+    #import patsy
+    #y_tr, X_tr = patsy.dmatrices(formula_str, train, return_type="dataframe")
+    #X_te = patsy.dmatrix(X_tr.design_info, test, return_type="dataframe")
+
+    # AFTER
+    if formula_str is not None:
+        from sklearn.preprocessing import StandardScaler
+        rhs = formula_str.split("~", 1)[1].strip() if "~" in formula_str else formula_str
+        X_tr_df = patsy.dmatrix(rhs, train, return_type="dataframe")
+        X_te_df = patsy.dmatrix(X_tr_df.design_info, test, return_type="dataframe")
+        X_tr_df = X_tr_df.drop(columns=["Intercept"], errors="ignore")
+        X_te_df = X_te_df.drop(columns=["Intercept"], errors="ignore")
+        X_te_df = X_te_df.reindex(columns=X_tr_df.columns, fill_value=0.0)  # ← fixes index OOB
+        feature_cols = list(X_tr_df.columns)
+        scaler = StandardScaler()
+        X_tr = scaler.fit_transform(X_tr_df.values.astype(float))            # ← fixes convergence
+        X_te = scaler.transform(X_te_df.values.astype(float))
+    else:
+        X_tr = train[feature_cols].values.astype(float)
+        X_te = test[feature_cols].values.astype(float)
     y_tr = train[outcome_col].values
-    X_te = test[feature_cols].values.astype(float)
 
     # Drop NaN/Inf rows from training
+    #bad_tr = ~np.isfinite(X_tr).all(axis=1)
+    #X_tr = X_tr[~bad_tr]
+    #y_tr = y_tr[~bad_tr]
+    # NEW:
     bad_tr = ~np.isfinite(X_tr).all(axis=1)
+    bad_outcome = np.array([not isinstance(v, str) for v in y_tr])  # ← NEW
+    bad_tr = bad_tr | bad_outcome                                     # ← NEW
     X_tr = X_tr[~bad_tr]
     y_tr = y_tr[~bad_tr]
     if len(X_tr) == 0:
-        return None
+        #return None
+        return (None, None) if return_clf else None 
     if len(np.unique(y_tr)) < 2:
-        return None
+        #return None
+        return (None, None) if return_clf else None 
 
     clf = _make_multinom_clf()
     try:
         clf.fit(X_tr, y_tr)
+        clf.feature_names = feature_cols
+        clf.scaler_ = scaler if formula_str is not None else None
     except Exception as e:
         warnings.warn(f"_fit_predict_multinom fit failed: {e}")
-        return None
+        #return None
+        return (None, None) if return_clf else None 
 
     # Identify NaN/Inf rows in test — return NaN probs for those
     bad_te = ~np.isfinite(X_te).all(axis=1)
@@ -432,7 +630,9 @@ def _fit_predict_multinom(train, test, feature_cols, outcome_col="outcome"):
     if (~bad_te).any():
         probs[~bad_te] = clf.predict_proba(X_te[~bad_te])
 
-    return pd.DataFrame(probs, columns=[f"cv_{c}" for c in clf.classes_], index=test.index)
+    #return pd.DataFrame(probs, columns=[f"cv_{c}" for c in clf.classes_], index=test.index)
+    preds_df = pd.DataFrame(probs, columns=[f"cv_{c}" for c in clf.classes_], index=test.index)
+    return (preds_df, clf) if return_clf else preds_df
 
 
 def _parse_formula_cols(formula_str):
@@ -446,7 +646,7 @@ def _parse_formula_cols(formula_str):
 
 
 def compute_cv_global(formula_str, data_train, holdout_years,
-                       true_holdout_years=(), data_pred=None, n_jobs=1):
+                       true_holdout_years=(), data_pred=None, n_jobs=1, save_coefs=False):
     """Leave-one-year-out CV using multinomial logistic, pooling all cells.
 
     IMPORTANT: data_train should be restrict_to_allowed(wide_df, dissemination_cells)
@@ -461,6 +661,10 @@ def compute_cv_global(formula_str, data_train, holdout_years,
 
     results = []
     data_train = data_pred
+
+    # NEW — one line added before the loop:
+    coefs_by_year = {}
+
     for test_year in holdout_years:
         train = data_train[
             (data_train["year"] != test_year) & (~data_train["year"].isin(true_holdout_years))
@@ -473,12 +677,61 @@ def compute_cv_global(formula_str, data_train, holdout_years,
 #        sys.exit()
         if train.empty or test.empty:
             continue
-        preds = _fit_predict_multinom(train, test, feature_cols)
+        #preds = _fit_predict_multinom(train, test, feature_cols)
+        #if preds is not None:
+        #    result = pd.concat([test.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
+        #    results.append(result)
+
+        # NEW — inside loop:
+#        preds, clf = _fit_predict_multinom(train, test, feature_cols,
+#                                           return_clf=True)                     # ← NEW
+        preds, clf = _fit_predict_multinom(train, test, feature_cols, return_clf=True,
+                                   formula_str=formula_str)
         if preds is not None:
             result = pd.concat([test.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
             results.append(result)
 
-    return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+#            if save_coefs and clf is not None:                                  # ← NEW
+#                rows = []                                                       # ← NEW
+#                for i, cls in enumerate(clf.classes_):                         # ← NEW
+#                    for j, feat in enumerate(feature_cols):                    # ← NEW
+#                        rows.append({                                           # ← NEW
+#                            "test_year":   test_year,                          # ← NEW
+#                            "class":       cls,                                 # ← NEW
+#                            "feature":     feat,                               # ← NEW
+#                            "coefficient": float(clf.coef_[i, j]),            # ← NEW
+#                            "intercept":   float(clf.intercept_[i]),           # ← NEW
+#                        })                                                      # ← NEW
+#                coefs_by_year[test_year] = pd.DataFrame(rows)                  # ← NEW
+
+
+            # AFTER
+            if save_coefs and clf is not None:
+                rows = []
+                actual_features = clf.feature_names   # ← use what clf actually saw
+                for i, cls in enumerate(clf.classes_):
+                    for j, feat in enumerate(actual_features):       # ← iterate over actual columns
+                        rows.append({
+                            "test_year":   test_year,
+                            "class":       cls,
+                            "feature":     feat,
+                            "coefficient": float(clf.coef_[i, j]),
+                            "intercept":   float(clf.intercept_[i]),
+                        })
+                #coefs_by_year[test_year] = pd.DataFrame(rows)
+                coefs_by_year[test_year] = {
+                    "coefs":    pd.DataFrame(rows),
+                    "scaler":   clf.scaler_,
+                    "features": actual_features,
+                }
+
+    #return pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+    # NEW — final return:
+    cv_preds = pd.concat(results, ignore_index=True) if results else pd.DataFrame()
+    #if save_coefs:                                                              # ← NEW
+    #    return cv_preds, coefs_by_year                                         # ← NEW
+    #return cv_preds                                                             # ← NEW (was a one-liner)
+    return cv_preds, coefs_by_year                                         # ← NEW
 
 
 def compute_cv_local(formula_str, data, holdout_years):
@@ -495,7 +748,8 @@ def compute_cv_local(formula_str, data, holdout_years):
             test = cell_data[cell_data["year"] == test_year]
             if train.empty or test.empty:
                 continue
-            preds = _fit_predict_multinom(train, test, feature_cols)
+            #preds = _fit_predict_multinom(train, test, feature_cols)
+            preds = _fit_predict_multinom(train, test, feature_cols, formula_str=formula_str)
             if preds is not None:
                 result = pd.concat([test.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
                 results.append(result)
@@ -521,7 +775,8 @@ def compute_cv_neighbors(formula_str, data, holdout_years, lat_band=2, lon_band=
             test = data[(data["year"] == test_year) & (data["id"] == cell["id"])]
             if train.empty or test.empty:
                 continue
-            preds = _fit_predict_multinom(train, test, feature_cols)
+            #preds = _fit_predict_multinom(train, test, feature_cols)
+            preds = _fit_predict_multinom(train, test, feature_cols, formula_str=formula_str)
             if preds is not None:
                 result = pd.concat([test.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
                 results.append(result)
@@ -544,7 +799,8 @@ def compute_cv_clusters(formula_str, data, holdout_years, cluster_var):
             test = data[(data["year"] == test_year) & (data["id"] == cell["id"])]
             if train.empty or test.empty:
                 continue
-            preds = _fit_predict_multinom(train, test, feature_cols)
+            #preds = _fit_predict_multinom(train, test, feature_cols)
+            preds = _fit_predict_multinom(train, test, feature_cols, formula_str=formula_str)
             if preds is not None:
                 result = pd.concat([test.reset_index(drop=True), preds.reset_index(drop=True)], axis=1)
                 results.append(result)
@@ -635,6 +891,7 @@ def compute_cell_metrics_fast(df, allowed_cells=None):
     sub = df.dropna(subset=["outcome"] + cv_cols5).copy()
     if allowed_cells is not None:
         sub = sub[sub["id"].isin(set(allowed_cells["id"]))]
+    sub = sub.reset_index(drop=True) # --NEW
 
     if sub.empty:
         return pd.DataFrame()
@@ -659,10 +916,15 @@ def compute_cell_metrics_fast(df, allowed_cells=None):
     # --- Per-cell metrics ---
     rows = []
     for cell_id, g_idx in sub.groupby("id").groups.items():
-        g_P5 = P5[sub.index.get_indexer(g_idx)]
-        g_Y5 = Y5[sub.index.get_indexer(g_idx)]
-        g_Prps = P_rps[sub.index.get_indexer(g_idx)]
-        g_Yrps = Y_rps[sub.index.get_indexer(g_idx)]
+        #g_P5 = P5[sub.index.get_indexer(g_idx)]
+        #g_Y5 = Y5[sub.index.get_indexer(g_idx)]
+        #g_Prps = P_rps[sub.index.get_indexer(g_idx)]
+        #g_Yrps = Y_rps[sub.index.get_indexer(g_idx)]
+        pos = sub.index.get_indexer(g_idx)       # now safe: index is contiguous, no -1s
+        g_P5 = P5[pos]
+        g_Y5 = Y5[pos]
+        g_Prps = P_rps[pos]
+        g_Yrps = Y_rps[pos]
 
         brier = float(np.mean(np.sum((g_P5 - g_Y5) ** 2, axis=1)))
         rps = pooled_rps5(g_Prps, g_Yrps)

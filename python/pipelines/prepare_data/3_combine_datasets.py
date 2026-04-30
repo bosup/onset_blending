@@ -66,6 +66,33 @@ def main():
     forecast_daily = {nm: fp["daily"] for nm, fp in forecast_parts.items()}
     forecast_const = {nm: fp["constants"] for nm, fp in forecast_parts.items()}
 
+
+#    # === DIAGNOSTIC: check id/time coverage vs forecasts ===
+#    if clim_list and forecast_daily:
+#        clim_ids  = set(clim_list[0]["id"].astype(str).unique())
+#        fcast_ids = set(list(forecast_daily.values())[0]["id"].astype(str).unique())
+#        only_in_fcast = fcast_ids - clim_ids
+#        only_in_clim  = clim_ids - fcast_ids
+#        print(f"\nDIAGNOSTIC: id coverage")
+#        print(f"  IDs in forecast but NOT in clim : {len(only_in_fcast)}")
+#        print(f"  IDs in clim but NOT in forecast : {len(only_in_clim)}")
+#        if only_in_fcast:
+#            print(f"  Sample forecast-only ids: {list(only_in_fcast)[:5]}")
+#        if only_in_clim:
+#            print(f"  Sample clim-only ids   : {list(only_in_clim)[:5]}")
+#    
+#        # Check time overlap for a shared id
+#        shared_id = next(iter(clim_ids & fcast_ids), None)
+#        if shared_id:
+#            clim_times  = set(clim_list[0].loc[clim_list[0]["id"]==shared_id, "time"].astype(str))
+#            fcast_times = set(list(forecast_daily.values())[0].loc[
+#                list(forecast_daily.values())[0]["id"]==shared_id, "time"].astype(str))
+#            print(f"\n  Time overlap check for id='{shared_id}':")
+#            print(f"    clim  time range : {sorted(clim_times)[:3]} ... {sorted(clim_times)[-3:]}")
+#            print(f"    fcast time range : {sorted(fcast_times)[:3]} ... {sorted(fcast_times)[-3:]}")
+#    # === END DIAGNOSTIC ===
+
+
     # Combine daily: clim + forecast daily tables
     daily_tables = clim_list + list(forecast_daily.values())
 

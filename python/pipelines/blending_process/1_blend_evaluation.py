@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 from python.pipelines._shared.misc import coalesce
 from python.blending_process.blend_evaluation_utils import (
     build_formulas_from_spec,
+    print_formula_summary,
     compute_cv_global,
     compute_cv_local,
     compute_cv_neighbors,
@@ -75,7 +76,10 @@ def main():
     with open(spec_path, "r") as f:
         spec = yaml.safe_load(f)
 
-    path_box = "Monsoon_Data/results/2025_model_evaluation"
+    #path_box = "Monsoon_Data/results/2025_model_evaluation"
+    pipeline_output_dir = spec["run"].get("pipeline_output_dir", "")   # default: no subfolder
+    path_box = os.path.join("Monsoon_Data/results", pipeline_output_dir)
+
     os.makedirs(path_box, exist_ok=True)
 
     cutoff_mode = coalesce(spec.get("run", {}).get("cutoff_mode"), "mok")
@@ -90,7 +94,10 @@ def main():
     output_tag = f"{cutoff_tag}{year_tag}"
 
     # Load dissemination cells
-    dissemination_cells = pd.read_csv("Monsoon_Data/dissemination_cells.csv")
+    #dissemination_cells = pd.read_csv("Monsoon_Data/dissemination_cells.csv")
+    #dissemination_cells = pd.read_csv("Monsoon_Data/dissemination_cells_box1.csv")
+    dissemination_csv = spec["cell"].get("dissemination", "")
+    dissemination_cells = pd.read_csv(dissemination_csv)
     dissemination_cells["id"] = (
         format_coord(dissemination_cells["lat"]) + "_" +
         format_coord(dissemination_cells["lon"])
@@ -98,16 +105,127 @@ def main():
 
     # Load data
     input_file = input_rds_from_cutoff(cutoff_mode)
-    input_path = os.path.join("Monsoon_Data/Processed_Data/2025_pipeline_input", input_file)
+    #input_path = os.path.join("Monsoon_Data/Processed_Data/2025_pipeline_input", input_file)
+    pipeline_input_dir = spec["run"].get("pipeline_input_dir", "")   # default: no subfolder
+    input_path = os.path.join(
+        "Monsoon_Data/Processed_Data/pipeline_input",
+        pipeline_input_dir,
+        input_file,
+    )
+
     with open(input_path, "rb") as f:
         wide_df = pickle.load(f)
-    wide_df = wide_df[wide_df["outcome"].notna()].copy()
+
+
+#    # --- DIAGNOSTIC
+#    mask = wide_df["prob_clim_mr_week1"].isna() & wide_df["ngcm_p_onset_clim_mok_date_week1"].notna()
+#    print(f"Before outcome filter — NaN clim but valid ngcm: {mask.sum()}")
+#    print(f"  of which outcome is notna: {(mask & wide_df['outcome'].notna()).sum()}")
+#    print(f"  of which outcome is NA:    {(mask & wide_df['outcome'].isna()).sum()}")
+#    print(f"  unique ids affected: {wide_df[mask]['id'].nunique()}")
+#    print(f"  unique years affected: {sorted(wide_df[mask]['year'].unique())}")
+#
+#
+#    # Load ground truth to count onset samples per cell
+#    gt_path = "Monsoon_Data/Processed_Data/Models/imd_clim_mok_date_wide.pkl"
+#    with open(gt_path, "rb") as f:
+#        gt_wide = pickle.load(f)
+#    
+#    # Get the 570 ghost cells (NaN clim but valid ngcm, before outcome filter)
+#    mask = wide_df["prob_clim_mr_week1"].isna() & wide_df["ngcm_p_onset_clim_mok_date_week1"].notna()
+#    ghost_ids = set(wide_df[mask]["id"].unique())
+#    
+#    # Count non-NaN onset years per cell in ground truth
+#    gt_counts = (
+#        gt_wide[gt_wide["id"].isin(ghost_ids)]
+#        .groupby("id")
+#        .apply(lambda g: pd.Series({
+#            "n_years_total": len(g),
+#            "n_years_with_onset": g["mr_onset_day"].notna().sum(),
+#            "lat": g.name.split("_")[0],
+#            "lon": g.name.split("_")[1],
+#        }))
+#        .reset_index()
+#        .sort_values("n_years_with_onset")
+#    )
+#
+#    print(f"\nGround truth sample counts for {len(ghost_ids)} ghost cells:")
+#    print(gt_counts.to_string(index=False))
+#    # --- DIAGNOSTIC END
+
+
+#    wide_df = wide_df[wide_df["outcome"].notna()].copy()
+#
+#    # --- DIAGNOSTIC
+#    mask = wide_df["prob_clim_mr_week1"].isna() & wide_df["ngcm_p_onset_clim_mok_date_week1"].notna()
+#    #print(f"\nRows where prob_clim_mr_week1 is NaN but ngcm has a value: {mask.sum()}")
+#    #print(wide_df[mask][["id", "year", "time", "outcome", "prob_clim_mr_week1", "ngcm_p_onset_clim_mok_date_week1"]].to_string())
+#
+#    clim_cols = [c for c in wide_df.columns if c.startswith("prob_clim_mr")]
+#    raw_col = next((c for c in wide_df.columns if "ngcm" in c and "p_onset" in c and "week" in c), None)
+#    if clim_cols and raw_col:
+#        has_raw   = wide_df[raw_col].notna()
+#        no_clim   = wide_df[clim_cols[0]].isna()
+#        ghost_ids = wide_df.loc[has_raw & no_clim, "id"].unique()
+#        print(f"\nCells with raw ngcm score but no blend output (NaN clim): {len(ghost_ids)}")
+#        print(sorted(ghost_ids)[:10])
+#    # --- DIAGNOSTIC END
+
+
+#    # --- DIAGNOSTIC: find the 74 rows ---
+#    holdout_mask = wide_df["year"].isin(training_years)  # or holdout_years
+#    
+#    # Check which columns have NaN in holdout rows
+#    clim_cols = [c for c in wide_df.columns if c.startswith("prob_clim_mr")]
+#    ngcm_cols = [c for c in wide_df.columns if "ngcm_p_onset" in c and "week" in c]
+#    aifs_cols = [c for c in wide_df.columns if "aifs_p_onset" in c and "week" in c]
+#    
+#    sub = wide_df[wide_df["year"].isin([2019, 2020, 2021, 2022])]
+#    print(f"\nTotal holdout rows: {len(sub)}")
+#    print(f"\nNaN counts in climatology columns:")
+#    print(sub[clim_cols].isna().sum())
+#    print(f"\nNaN counts in ngcm columns (sample):")
+#    print(sub[ngcm_cols[:4]].isna().sum())
+#    print(f"\nNaN counts in aifs columns (sample):")
+#    print(sub[aifs_cols[:4]].isna().sum())
+#    
+#    # Show the rows that have NaN clim but non-NaN ngcm
+#    if clim_cols and ngcm_cols:
+#        nan_clim = sub[clim_cols[0]].isna()
+#        nan_ngcm = sub[ngcm_cols[0]].isna()
+#        mismatch = sub[nan_clim & ~nan_ngcm]
+#        print(f"\nRows with NaN clim but valid ngcm: {len(mismatch)}")
+#        if len(mismatch) > 0:
+#            print(mismatch[["id", "lat", "lon", "year", "time", "outcome"] + clim_cols[:2] + ngcm_cols[:2]].head(10))
+#            print("\nUnique cells affected:", mismatch["id"].nunique())
+#            print("Years affected:", sorted(mismatch["year"].unique()))
+#            print("Time range:", mismatch["time"].min(), "to", mismatch["time"].max())
+#    # --- END DIAGNOSTIC ---
+
+
+    # Drop rows with NaN in any feature column to ensure consistent n
+    # across blended models and raw/calibrated forecast evaluation
+    feature_prefixes = ("prob_clim_mr", "diff_", "min_", "max_")
+    feature_cols = [c for c in wide_df.columns
+                    if any(c.startswith(p) for p in feature_prefixes)]
+    wide_df = wide_df.dropna(subset=feature_cols).copy()
+    print(f"After feature NaN filter: {len(wide_df)} rows")
+
+#    # Drop rows with NaN in any formula feature column so n is consistent
+#    # across blended models and raw/calibrated forecasts
+#    all_feature_cols = set()
+#    for formula_str in build_formulas_from_spec(spec, cutoff_mode).values():
+#        all_feature_cols.update(_parse_formula_cols(formula_str))
+#    all_feature_cols = [c for c in all_feature_cols if c in wide_df.columns]
+#    wide_df = wide_df.dropna(subset=all_feature_cols).copy()
+#    print(f"After feature NaN filter: {len(wide_df)} rows")
 
     print(f"Loaded {len(wide_df)} rows from {input_path}")
 
     # Build formulas from spec
     formulas = build_formulas_from_spec(spec, cutoff_mode)
     print(f"Formulas: {list(formulas.keys())}")
+    print_formula_summary(spec, cutoff_mode)
 
     # FIX Bug 1: restrict training to allowed cells; predict on all cells
     wide_df_allowed = restrict_to_allowed(wide_df, dissemination_cells)
@@ -129,20 +247,35 @@ def main():
             try:
                 if method == "global":
                     # FIX Bug 1: train on allowed cells only, predict on all cells
-                    cv_preds = compute_cv_global(
+                    # OLD:
+                    #cv_preds = compute_cv_global(
+                    #    formula_str,
+                    #    wide_df_allowed,          # <-- training restricted to allowed
+                    #    holdout_years,
+                    #    true_holdout_years=true_holdout_years,
+                    #    data_pred=wide_df,         # <-- predict on all cells
+                    #)
+                    # NEW:
+                    cv_preds, coefs_by_year = compute_cv_global(             # ← NEW (unpack tuple)
                         formula_str,
-                        wide_df_allowed,          # <-- training restricted to allowed
+                        wide_df_allowed,
                         holdout_years,
                         true_holdout_years=true_holdout_years,
-                        data_pred=wide_df,         # <-- predict on all cells
+                        data_pred=wide_df,
+                        save_coefs=True,                                     # ← NEW
                     )
+                    cv_preds = cv_preds.reset_index(drop=True)
+
                 elif method == "local":
                     cv_preds = compute_cv_local(formula_str, wide_df, holdout_years)
+                    coefs_by_year = {}
                 elif method == "neighbors":
                     cv_preds = compute_cv_neighbors(formula_str, wide_df, holdout_years)
+                    coefs_by_year = {}
                 elif method.startswith("cluster"):
                     cluster_var = spec.get("cv", {}).get("cluster_var", "cluster")
                     cv_preds = compute_cv_clusters(formula_str, wide_df, holdout_years, cluster_var)
+                    coefs_by_year = {}
                 else:
                     warnings.warn(f"Unknown CV method: {method}. Skipping.")
                     continue
@@ -184,7 +317,30 @@ def main():
                 with open(pred_path, "wb") as f:
                     pickle.dump(cv_preds, f)
 
+                # OLD — nothing after saving cv_preds
+
+                # NEW — added block:
+                if method == "global" and coefs_by_year:                     # ← NEW
+                    for yr, coef_df in coefs_by_year.items():                # ← NEW
+                        coef_path = os.path.join(                            # ← NEW
+                            path_box,                                        # ← NEW
+                            f"coefs_{model_name}_{method}{output_tag}_year{yr}.pkl"  # ← NEW
+                        )                                                    # ← NEW
+                        # BEFORE
+                        #with open(coef_path, "wb") as f:                     # ← NEW
+                        #    pickle.dump(coef_df, f)                          # ← NEW
+                        # AFTER
+                        with open(coef_path, "wb") as f:
+                            pickle.dump(coefs_by_year[yr], f)  # now a dict with coefs/scaler/features
+                    print(f"  Saved coefficients for {len(coefs_by_year)} test years")  # ← NEW
+
+            #except Exception as e:
+            #    warnings.warn(f"Error in {model_name}/{method}: {e}")
+            #    continue
+
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 warnings.warn(f"Error in {model_name}/{method}: {e}")
                 continue
 

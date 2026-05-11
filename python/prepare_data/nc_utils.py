@@ -683,7 +683,9 @@ def process_rainfall_forecast_id(df, spec, mok_dt=None, thr_dt=None):
     Returns dict: {"wide": DataFrame}
     """
     df = df.copy()
+#    print("START shape:", df.shape)
     df = add_id_from_latlon(df)
+#    print("after add_id shape:", df.shape)
     if "time" in df.columns:
         df["time"] = pd.to_datetime(df["time"]).dt.date
     if "year" in df.columns:
@@ -697,19 +699,22 @@ def process_rainfall_forecast_id(df, spec, mok_dt=None, thr_dt=None):
     max_number = filter_cfg.get("max_number")
 
     df = attach_thresholds_id(df, thr_dt)
+#    print("after thresholds shape:", df.shape)
     if mok_dt is not None and "year" in df.columns:
         df = df.merge(mok_dt, on="year", how="left")
     else:
         df["mok_date"] = pd.NaT
-
+#    print("after mok merge shape:", df.shape)
     if has_number and max_number is not None:
         df = df[df["number"] <= int(max_number)]
+#        print("after number filter shape:", df.shape)
         if df.empty:
             raise ValueError(f"After filtering number <= {max_number}, no rows remain.")
 
     wide_prefix = spec.get("input", {}).get("wide_prefix") or spec["input"]["value_col"].lower()
     day_pattern = re.compile(rf"^{re.escape(wide_prefix)}_day_(\d+)$")
     day_cols_pref = [c for c in df.columns if day_pattern.match(c)]
+#    print("day_cols_pref found:", day_cols_pref[:5])
     if not day_cols_pref:
         raise ValueError(f"No wide day columns matched pattern '{wide_prefix}_day_<n>'")
 
@@ -724,6 +729,19 @@ def process_rainfall_forecast_id(df, spec, mok_dt=None, thr_dt=None):
         key_base.append("year")
     key_base += ["onset_thresh", "mok_date"]
     key_member = key_base + (["number"] if has_number else [])
+
+    # Drop non-key, non-day columns that would cause merge collisions  <---NEW, DEBUG
+    # lat and lon are the extra columns surviving into the groupby. They're not in key_member and not day columns, so they get carried into both stats_agg and prob_agg as extra columns. When stats_agg.merge(prob_agg, on=key_base) runs, both dataframes have lat and lon → collision → lat_x, lat_y, lon_x, lon_y. And since the groupby aggregation can't handle them properly with a single time step, rows collapse to zero. The fix  — drop lat and lon before the groupby 
+
+    cols_to_drop = [c for c in df.columns
+                    if c not in key_member
+                    and not any(c == str(i) for i in range(1, 100))]
+    df = df.drop(columns=cols_to_drop)
+#    print("dropped cols:", cols_to_drop)  # remove after confirming fix
+
+#    print("df columns after rename:", df.columns.tolist())
+#    print("key_base:", key_base)
+#    print("columns NOT in key_member:", [c for c in df.columns if c not in key_member and not any(c == str(i) for i in range(1,50))])
 
     day_cols, day_ints = order_day_cols(df, key_member)
     onset_params = read_onset_params(spec)
@@ -918,6 +936,9 @@ def run_single_pipeline(spec_id):
             day_dim = spec["input"].get("wide_day_dim", "day")
             dt = nc_read_forecast_wide(nc_path, var_name, dim_rename_map, spec,
                                        day_dim=day_dim, prefix=wide_prefix)
+#            print("dt.shape:", dt.shape)
+#            print("dt.columns:", dt.columns.tolist()[:10])
+#            print("dt.head(2):", dt.head(2))
 #            print(dt.iloc[:5, :])
             if dt is None:
                 print(f"  Skipping {nc_path}: variable '{var_name}' not found.")

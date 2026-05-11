@@ -1,0 +1,149 @@
+# ==============================================================================
+# Spec for  NeuralGCM rainfall forecasts (from "ngcm_more" folder) at the 2 degree x 2 degree gird cell level
+# ngcm.yml
+# Feeds into 1_process_raw_nc_files.R
+# ------------------------------------------------------------------------------
+# This YAML feeds the combined "NetCDF -> onset outputs" pipeline.
+# ==============================================================================
+
+
+
+
+output:
+  # Final outputs are appended across years into these files:
+  # rainfall_forecast: <basename>_wide.csv
+  # ground_truth_rainfall: <basename>_wide.csv and <basename>_long.csv
+  out_dir: "Monsoon_Data/Processed_Data/2026"
+  # basename derived from spec_id
+
+
+
+# Options: "rainfall_forecast" or "ground_truth_rainfall"
+type: "rainfall_forecast"
+
+input:
+  # Folder of NetCDF files
+  #nc_folder: "/Users/bodong/Code/project/ROMP/data/gencast"
+  nc_folder: "/Users/bodong/Code/project/forecast/aifs_ens"
+  # Regex used to select files within nc_folder.
+  # MUST include a 4-digit year somewhere in the filename for year extraction.
+  # Examples matched: "2000.nc", "data_2000.nc"
+  #file_regex: ".*\\b(19|20)\\d{2}\\b.*\\.nc$"
+  file_regex: ".*2026.*\\.nc$"
+
+  # Main NetCDF variable to read (you'll need to open an nc file to check this)
+  value_col: "tp"
+
+  # --- Forecast-only wide settings ---
+  # Name AFTER dimensions.rename is applied (defaults in code if omitted)
+  wide_day_dim: "day"
+  # Column prefix used when constructing wide day columns:
+  # <wide_prefix>_day_<daynum>, e.g., rain_day_1, rain_day_2, ...
+  wide_prefix: "rain"
+
+  # Parallelism
+  parallel: true
+  # If parallel: true, number of workers (optional; defaults to 5)
+  workers: 9
+
+dimensions:
+  # Case-insensitive rename mapping applied to NetCDF dim/coord columns.
+  # Use this to standardize to: lat, lon, time, day, number, etc.
+  rename:
+    latitude: "lat"
+    longitude: "lon"
+    time: "time"
+    day: "day"
+    number: "number"
+
+# ----------------------------
+# Processing options
+# ----------------------------
+options:
+  window: 3                      # Onset rolling window length (days)
+  onset_definition:
+    wet_day_min_mm: 1.0          # wet day threshold
+    follow_days: 0              # days after trigger to check (21 for Ethiopia ICPAC definition)
+
+    dry_spell:
+      mode: consecutive_dry      # or: window_sum
+      # --- consecutive_dry ---
+      min_dry_days: 7
+      dry_day_min_mm: 1.0        # optional, defaults to wet_day_min_mm
+
+      # --- window_sum (Moron-Robertson definition) ---
+      # mode: window_sum
+      # sum_window: 10
+      # sum_min_mm: 5.0
+
+  # Forecast-only: keep lead days in [min_day, max_day + window - 1]
+  min_day: 1
+  max_day: 40
+
+
+  # Ground-truth-only: earliest allowed onset date within year
+  # cutoff_month_day: "05-01"
+
+# ----------------------------
+# Optional: cell transform (linear combination by id)
+# ----------------------------
+  # If enabled, regrid the rainfall from a source grid to a target grid
+  # Requires a cell transform file expressing rainfall on each target grid cell as a 
+  # linear combination of rainfall on one or more source grid cells
+  # Cheap version of downscaling. In general we shouldn't do it for ground truth files, only for forecast files.
+  cell_transform_enabled: false
+  #cell_transform_file: "Monsoon_Data/weights/equal_overlap_weights_25_to_2.csv"
+  # Transform file must be long format with columns:
+  #   target_id, source_id, weight
+
+# ----------------------------
+# Thresholds (onset threshold per grid cell)
+# ----------------------------
+thresholds:
+  # Supported types:
+  #   - CSV/TSV (fread)
+  #   - NetCDF (.nc / .nc4)
+  #   - MATLAB (.mat)  [requires R.matlab package]
+  #
+  # IMPORTANT: thresholds must match the grid used by processing:
+  #   - if cell_transform_enabled: thresholds should match target_id grid
+  #   - else: thresholds should match original grid (ids derived from lat/lon)
+  file: "Monsoon_Data/reference/thresholds_df.csv"
+
+  # --- For CSV thresholds ---
+  # These are used only if the threshold file is a table with columns.
+  # If your file already has id + onset_thresh, that also works (id is respected).
+  lat_col: "lat"
+  lon_col: "lon"
+  thresh_col: "onset_threshold"
+
+  # --- For NetCDF thresholds (optional overrides) ---
+  # lat_var: "lat"
+  # lon_var: "lon"
+  # thresh_var: "MWmean"
+
+  # --- For .mat thresholds (optional overrides) ---
+  # mat_lat_name: "lat"
+  # mat_lon_name: "lon"
+  # mat_thresh_name: "onset.day.thres"
+
+# ----------------------------
+# MOK (optional)
+# ----------------------------
+mok:
+  # If you use MOK, provide this file and column mapping.
+  # If you omit mok entirely, pipeline will set mok_date = NA and skip MOK restriction.
+  file: "Monsoon_Data/reference/MOK Onset May.csv"
+  year_col: "Year"
+  day_col: "MOK"
+  # mok_date = as.Date(paste0(year, "-", base_date)) + day
+  base_date: "05-01"
+
+# ----------------------------
+# Optional filters (applied before onset processing)
+# Optional spatial/temporal filters. Currently, filtering is handled
+# via years and thresholds; id-based filtering can be added here if needed.
+# ----------------------------
+filter:
+  max_number: 30
+  # ensure 30 ensemble members across all runs

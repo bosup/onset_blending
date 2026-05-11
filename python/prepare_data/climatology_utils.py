@@ -43,7 +43,12 @@ def get_paths_clim(spec):
 
     Returns dict: gt_path, out_dir, out_stem
     """
-    gt_path = os.path.join(spec["output"]["out_dir"], f"{spec['id']}_wide.pkl")
+    # Use explicit gt_path from yml if provided, otherwise derive from spec_id
+    gt_path = (
+        spec.get("input", {}).get("gt_path")
+        or os.path.join(spec["output"]["out_dir"], f"{spec['id']}_wide.pkl")
+    )
+    #gt_path = os.path.join(spec["output"]["out_dir"], f"{spec['id']}_wide.pkl")
     out_dir = (
         spec.get("paths", {}).get("climatology_out_dir")
         or os.path.join(os.path.dirname(spec["output"]["out_dir"]), "Climatology")

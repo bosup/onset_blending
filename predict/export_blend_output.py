@@ -17,13 +17,31 @@ Climatology    : the weekly-bin wide pickle      (from 0_connect_...py)
 
 Usage (run from repo root)
 --------------------------
-    python export_blend_output.py \\
+Standard mode (two input files derived from spec):
+    python predict/export_blend_output.py \\
         --issue_date  2021-06-15 \\
         --spec_id     cv_models_clim_mok_date \\
         --model       blended_model \\
-        [--coef_dir  Monsoon_Data/results/2025_model_evaluation/] \\
+        [--method     global] \\
+        [--coef_dir   Monsoon_Data/results/2025_model_evaluation/] \\
+        [--cv_preds_file  Monsoon_Data/results/2025_model_evaluation/cv_preds_blended_model_global_clim_mok_date_2026.pkl] \\
         [--pipeline_input_dir Monsoon_Data/Processed_Data/2025_pipeline_input] \\
-        [--out_dir      Monsoon_Data/results/2025_model_evaluation/exports/]
+        [--input_path Monsoon_Data/Processed_Data/2026_pipeline_input/cv_data_clim_mok_date_new_pipeline.pkl] \\
+        [--out_dir    Monsoon_Data/results/2025_model_evaluation/exports/]
+
+Operational mode (single combined preds pkl containing both cv_* and prob_clim_mr_* columns):
+    python predict/export_blend_output.py \\
+        --issue_date  2026-06-09 \\
+        --spec_id     cv_models_clim_mok_date_2026 \\
+        --preds_file  Monsoon_Data/results/2026/blended_model_global_year2026_preds.pkl \\
+        [--out_dir    Monsoon_Data/results/2026/exports/]
+
+Notes
+-----
+--cv_preds_file   overrides --coef_dir for locating the cv_preds pickle.
+--input_path  overrides --pipeline_input_dir for locating the wide pipeline pickle.
+--preds_file  activates operational mode: skips loading two separate files and reads
+              everything (cv_* and prob_clim_mr_* columns) from a single combined pkl.
 """
 
 import os
@@ -127,7 +145,19 @@ def main():
                         help="Output directory. "
                              "Default: Monsoon_Data/results/2025_model_evaluation/exports/")
     parser.add_argument("--pipeline_input_dir", default=None,
-                        help="Optional: Manual path to the wide climatology pickle file.")
+                        help="Optional: Subdirectory under Monsoon_Data/Processed_Data/ "
+                             "containing the wide pipeline pickle.")
+    parser.add_argument("--input_path", default=None,
+                        help="Optional: Direct path to the wide pipeline pickle file. "
+                             "Overrides --pipeline_input_dir and the default derived path.")
+    parser.add_argument("--cv_preds_file", default=None,
+                        help="Optional: Direct path to the cv_preds pickle file. "
+                             "Overrides --coef_dir and the auto-derived cv_preds filename.")
+    parser.add_argument("--preds_file", default=None,
+                        help="Optional: Operational mode. Direct path to a combined preds pkl "
+                             "(e.g. blended_model_global_year2026_preds.pkl) that contains both "
+                             "cv_* and prob_clim_mr_* columns. When provided, --cv_preds_file, "
+                             "--coef_dir, --input_path, and --pipeline_input_dir are all ignored.")
     args = parser.parse_args()
 
     # ── Parse date ────────────────────────────────────────────────────
@@ -150,54 +180,77 @@ def main():
     out_dir     = args.out_dir or os.path.join(coef_dir, "exports")
     os.makedirs(out_dir, exist_ok=True)
 
-    # ── Load cv_preds (blended model predictions) ─────────────────────
-    cv_path = find_cv_preds_file(coef_dir, args.model, args.method, output_tag)
-    print(f"Loading blended predictions : {cv_path}")
-    cv_preds = load_pkl(cv_path)
-    cv_preds["time"] = pd.to_datetime(cv_preds["time"]).dt.date
-
-    # Filter to issue date
-    blend_day = cv_preds[cv_preds["time"] == issue_date].copy()
-    if blend_day.empty:
-        available = sorted(cv_preds["time"].unique())
-        raise ValueError(
-            f"No blended model rows for issue_date={issue_date}.\n"
-            f"Available dates range: {available[0]} to {available[-1]}"
-        )
-    print(f"  Blended rows for {issue_date}: {len(blend_day)}")
-
-    # Rename cv_* columns to week*, later
-    bins = ["week1", "week2", "week3", "week4", "later"]
-    cv_col_map = {f"cv_{b}": b for b in bins}
-    blend_day = blend_day.rename(columns=cv_col_map)
-
-    # Keep only needed columns — include id for the merge
-    blend_cols = ["id", "lat", "lon", "time"] + bins
-    missing_bins = [b for b in bins if b not in blend_day.columns]
-    if missing_bins:
-        raise ValueError(f"Missing cv columns in blended predictions: {missing_bins}")
-    blend_day = blend_day[blend_cols].copy()
-
-    # ── Load wide_df (for climatology) ────────────────────────────────
-    input_file = input_rds_from_cutoff(cutoff_mode)
-    #pipeline_input_dir = os.path.join("Monsoon_Data/Processed_Data/2025_pipeline_input", input_file)
-    # Anchor the input data path to REPO_ROOT
-    #pipeline_input_dir = os.path.join(REPO_ROOT, "Monsoon_Data/Processed_Data/2025_pipeline_input", input_file)
-    # ── Resolve Input Path (Wide Pickle) ─────────────────────────────
-    if args.pipeline_input_dir:
-        pipeline_input_dir = args.pipeline_input_dir
-        input_path = os.path.join(REPO_ROOT, pipeline_input_dir, input_file)
+    # ── Operational mode: single combined preds pkl ───────────────────
+    if args.preds_file:
+        preds_path = args.preds_file
+        if not os.path.exists(preds_path):
+            raise FileNotFoundError(f"--preds_file not found: {preds_path}")
+        print(f"Operational mode — loading combined preds: {preds_path}")
+        combined = load_pkl(preds_path)
+        combined["time"] = pd.to_datetime(combined["time"]).dt.date
+        clim_day = combined[combined["time"] == issue_date].copy()
+        if clim_day.empty:
+            available = sorted(combined["time"].unique())
+            raise ValueError(
+                f"No rows for issue_date={issue_date} in preds file.\n"
+                f"Available dates: {available}"
+            )
+        print(f"  Rows for {issue_date}: {len(clim_day)}")
+        bins = ["week1", "week2", "week3", "week4", "later"]
+        cv_col_map = {f"cv_{b}": b for b in bins}
+        blend_day = clim_day.rename(columns=cv_col_map)
     else:
-        input_path = os.path.join(REPO_ROOT, "Monsoon_Data/Processed_Data/2025_pipeline_input", input_file)
+        # ── Load cv_preds (blended model predictions) ─────────────────
+        if args.cv_preds_file:
+            cv_path = args.cv_preds_file
+            if not os.path.exists(cv_path):
+                raise FileNotFoundError(f"--cv_preds_file not found: {cv_path}")
+        else:
+            cv_path = find_cv_preds_file(coef_dir, args.model, args.method, output_tag)
+        print(f"Loading blended predictions : {cv_path}")
+        cv_preds = load_pkl(cv_path)
+        cv_preds["time"] = pd.to_datetime(cv_preds["time"]).dt.date
 
-    print(f"Loading wide pickle         : {input_path}")
-    wide_df = load_pkl(input_path)
-    wide_df["time"] = pd.to_datetime(wide_df["time"]).dt.date
+        # Filter to issue date
+        blend_day = cv_preds[cv_preds["time"] == issue_date].copy()
+        if blend_day.empty:
+            available = sorted(cv_preds["time"].unique())
+            raise ValueError(
+                f"No blended model rows for issue_date={issue_date}.\n"
+                f"Available dates range: {available[0]} to {available[-1]}"
+            )
+        print(f"  Blended rows for {issue_date}: {len(blend_day)}")
 
-    clim_day = wide_df[wide_df["time"] == issue_date].copy()
-    if clim_day.empty:
-        raise ValueError(f"No wide_df rows for issue_date={issue_date}.")
-    print(f"  Climatology rows for {issue_date}: {len(clim_day)}")
+        # Rename cv_* columns to week*, later
+        bins = ["week1", "week2", "week3", "week4", "later"]
+        cv_col_map = {f"cv_{b}": b for b in bins}
+        blend_day = blend_day.rename(columns=cv_col_map)
+
+        # Keep only needed columns — include id for the merge
+        blend_cols = ["id", "lat", "lon", "time"] + bins
+        missing_bins = [b for b in bins if b not in blend_day.columns]
+        if missing_bins:
+            raise ValueError(f"Missing cv columns in blended predictions: {missing_bins}")
+        blend_day = blend_day[blend_cols].copy()
+
+        # ── Load wide_df (for climatology) ────────────────────────────
+        input_file = input_rds_from_cutoff(cutoff_mode)
+        # ── Resolve Input Path (Wide Pickle) ──────────────────────────
+        if args.input_path:
+            input_path = args.input_path
+        elif args.pipeline_input_dir:
+            input_path = os.path.join(REPO_ROOT, args.pipeline_input_dir, input_file)
+        else:
+            input_path = os.path.join(REPO_ROOT, "Monsoon_Data/Processed_Data/2025_pipeline_input", input_file)
+
+        print(f"Loading wide pickle         : {input_path}")
+        wide_df = load_pkl(input_path)
+        wide_df["time"] = pd.to_datetime(wide_df["time"]).dt.date
+
+        clim_day = wide_df[wide_df["time"] == issue_date].copy()
+        if clim_day.empty:
+            raise ValueError(f"No wide_df rows for issue_date={issue_date}.")
+        print(f"  Climatology rows for {issue_date}: {len(clim_day)}")
 
     # ── Extract climatology probabilities ─────────────────────────────
     # prob_clim_mr_week* are stored in logit scale → convert back with expit()

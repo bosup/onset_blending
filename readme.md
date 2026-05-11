@@ -154,6 +154,122 @@ python python/pipelines/blending_process/3_produce_figures.py
 
 **Outputs**: `Monsoon_Data/results/2025_model_evaluation/`
 
+---
+
+## Operational Forecasting (Single New Forecast Year)
+
+For generating a forecast for a new year (e.g. 2026), use `predict/run_operational_pipeline.py`. This runs all 8 pipeline steps in sequence with a single command, verifying that each step's output exists before proceeding to the next.
+
+### What it does
+
+| Step | Script | Description |
+|------|--------|-------------|
+| 1 | `1_process_raw_nc_files.py` | Process aifs NetCDF → onset probabilities pkl |
+| 2 | `1_process_raw_nc_files.py` | Process aifs_ens NetCDF → onset probabilities pkl |
+| 3 | `2_build_climatology.py` | Build KDE climatology for the forecast year |
+| 4 | `3_combine_datasets.py` | Merge forecasts + climatology + ground truth into wide table |
+| 5 | `0_connect_prepare_data_to_2025_pipeline.py` | Convert daily → weekly bins, compute rain predictors |
+| 6 | `predict/apply_blend_model.py` | Apply trained blending model to produce predictions |
+| 7 | `predict/export_blend_output.py` | Extract blended + climatology probabilities → summary CSV |
+| 8 | `predict/run_maps.py` | Generate forecast maps from summary CSV |
+
+### Prerequisites
+
+Before running, ensure you have:
+- Forecast NetCDF files for the new year (aifs and aifs_ens)
+- Trained blending model coef pkl from `1_blend_evaluation.py` (historical training)
+- Historical ground truth wide pkl (e.g. `imd_clim_mok_date_wide.pkl`) covering 2000–2022
+- All 2026 yml specs created in `specs/raw_data/`, `specs/combine/`, `specs/2025_blend/`, and `specs/connect/`
+
+### Minimal example
+
+```bash
+python predict/run_operational_pipeline.py \
+    --year 2026 \
+    --issue_date 2026-06-09 \
+    --aifs_spec aifs_2026 \
+    --aifs_ens_spec aifs_ens_2026 \
+    --clim_spec imd_clim_mok_date_2026 \
+    --combine_spec combine_template_clim_mok_date_2026 \
+    --connect_spec connect_clim_mok_date_2026 \
+    --blend_spec cv_models_clim_mok_date_2026 \
+    --coef_dir Monsoon_Data/results/wet_spell_aifs_aifs_ens \
+    --coef_tag clim_mok_date_2022_year2022 \
+    --blend_input Monsoon_Data/Processed_Data/2026/cv_data_clim_mok_date_new_pipeline_2026.pkl \
+    --work_dir Monsoon_Data/Processed_Data/2026
+```
+
+### With yml field overrides
+
+Three frequently-changing inputs can be overridden directly from the command line without editing yml files. `--gt_path` controls the historical ground truth pkl and simultaneously patches both the clim spec (`input.gt_path`) and the combine spec (`ground_truth_wide_rds`) since both must point to the same file.
+
+```bash
+python predict/run_operational_pipeline.py \
+    --year 2026 \
+    --issue_date 2026-06-09 \
+    --aifs_spec aifs_2026 \
+    --aifs_ens_spec aifs_ens_2026 \
+    --clim_spec imd_clim_mok_date_2026 \
+    --combine_spec combine_template_clim_mok_date_2026 \
+    --connect_spec connect_clim_mok_date_2026 \
+    --blend_spec cv_models_clim_mok_date_2026 \
+    --coef_dir Monsoon_Data/results/wet_spell_aifs_aifs_ens \
+    --coef_tag clim_mok_date_2022_year2022 \
+    --blend_input Monsoon_Data/Processed_Data/2026/cv_data_clim_mok_date_new_pipeline_2026.pkl \
+    --work_dir Monsoon_Data/Processed_Data/2026 \
+    --aifs_nc_folder /data/forecasts/aifs/2026 \
+    --aifs_ens_nc_folder /data/forecasts/aifs_ens/2026 \
+    --gt_path Monsoon_Data/Processed_Data/Models/wet_spell/imd_clim_mok_date_wide.pkl
+```
+
+When any of these overrides are provided, the script writes a patched temp spec (e.g. `aifs_2026_op.yml`) into the relevant `specs/` subdirectory, passes that to the downstream script, and deletes the temp file on exit.
+
+### Resuming after a failure
+
+Use `--skip_to N` to restart from a specific step without rerunning earlier (potentially expensive) steps:
+
+```bash
+# Re-run from step 6 onward (apply blend model through maps)
+python predict/run_operational_pipeline.py \
+    ... \
+    --skip_to 6
+```
+
+### Dry run
+
+Use `--dry_run` to print all commands that would be executed without running them — useful for verifying paths before committing to a full run:
+
+```bash
+python predict/run_operational_pipeline.py \
+    ... \
+    --dry_run
+```
+
+### All arguments
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `--year` | Yes | Forecast year, e.g. `2026` |
+| `--issue_date` | Yes | Forecast issue date, e.g. `2026-06-09` |
+| `--aifs_spec` | Yes | Spec ID for aifs `1_process_raw_nc_files`, e.g. `aifs_2026` |
+| `--aifs_ens_spec` | Yes | Spec ID for aifs_ens `1_process_raw_nc_files`, e.g. `aifs_ens_2026` |
+| `--clim_spec` | Yes | Spec ID for `2_build_climatology`, e.g. `imd_clim_mok_date_2026` |
+| `--combine_spec` | Yes | Spec ID for `3_combine_datasets`, e.g. `combine_template_clim_mok_date_2026` |
+| `--connect_spec` | Yes | Spec ID for `0_connect_prepare_data_to_2025_pipeline` |
+| `--blend_spec` | Yes | Spec ID for `apply_blend_model` |
+| `--coef_dir` | Yes | Directory containing the trained blending model coef pkl |
+| `--coef_tag` | Yes | Coef tag passed to `apply_blend_model --coef_tag`, e.g. `clim_mok_date_2022_year2022` |
+| `--blend_input` | Yes | Path to the wide pipeline pkl for `apply_blend_model --input_path` |
+| `--work_dir` | Yes | Output directory for all intermediate and final files |
+| `--aifs_nc_folder` | No | Override `input.nc_folder` in the aifs spec yml |
+| `--aifs_ens_nc_folder` | No | Override `input.nc_folder` in the aifs_ens spec yml |
+| `--gt_path` | No | Override ground truth pkl path in both the clim and combine specs |
+| `--map_output_path` | No | Output directory for maps (default: `predict/output/{year}/`) |
+| `--blend_model` | No | Blended model name (default: `blended_model`) |
+| `--region` | No | Region for map generation (default: `Ethiopia`) |
+| `--skip_to` | No | Skip to step N, 1-indexed (default: 1, run all) |
+| `--dry_run` | No | Print commands without executing |
+
 ### Testing the Onset Detection Logic
 
 ```bash

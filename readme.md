@@ -224,6 +224,15 @@ python predict/run_operational_pipeline.py \
 
 When any of these overrides are provided, the script writes a patched temp spec (e.g. `aifs_2026_op.yml`) into the relevant `specs/` subdirectory, passes that to the downstream script, and deletes the temp file on exit.
 
+To point directly at a specific NetCDF file (the most common operational case), use `--aifs_nc_file` / `--aifs_ens_nc_file`. These set `nc_folder` to the file's parent directory and `file_regex` to match the exact filename, so no manual regex editing is needed:
+
+```bash
+python predict/run_operational_pipeline.py \
+    ... \
+    --aifs_nc_file     /data/forecasts/aifs/2026.nc \
+    --aifs_ens_nc_file /data/forecasts/aifs_ens/aifs_ens_2026.nc
+```
+
 ### Resuming after a failure
 
 Use `--skip_to N` to restart from a specific step without rerunning earlier (potentially expensive) steps:
@@ -261,8 +270,10 @@ python predict/run_operational_pipeline.py \
 | `--coef_tag` | Yes | Coef tag passed to `apply_blend_model --coef_tag`, e.g. `clim_mok_date_2022_year2022` |
 | `--blend_input` | Yes | Path to the wide pipeline pkl for `apply_blend_model --input_path` |
 | `--work_dir` | Yes | Output directory for all intermediate and final files |
-| `--aifs_nc_folder` | No | Override `input.nc_folder` in the aifs spec yml |
-| `--aifs_ens_nc_folder` | No | Override `input.nc_folder` in the aifs_ens spec yml |
+| `--aifs_nc_file` | No | Path to a specific aifs NetCDF file; overrides both `input.nc_folder` and `input.file_regex` in the aifs spec. Takes priority over `--aifs_nc_folder` |
+| `--aifs_ens_nc_file` | No | Path to a specific aifs_ens NetCDF file; overrides both `input.nc_folder` and `input.file_regex` in the aifs_ens spec. Takes priority over `--aifs_ens_nc_folder` |
+| `--aifs_nc_folder` | No | Override `input.nc_folder` in the aifs spec yml (file_regex from yml unchanged) |
+| `--aifs_ens_nc_folder` | No | Override `input.nc_folder` in the aifs_ens spec yml (file_regex from yml unchanged) |
 | `--gt_path` | No | Override ground truth pkl path in both the clim and combine specs |
 | `--map_output_path` | No | Output directory for maps (default: `predict/output/{year}/`) |
 | `--blend_model` | No | Blended model name (default: `blended_model`) |

@@ -16,37 +16,45 @@ Steps
 7. export_blend_output.py     (with --preds_file)
 8. run_maps.py                (with --input_file)
 
-When --aifs_nc_folder, --aifs_ens_nc_folder, --gt_path are supplied, the script
-patches the relevant yml fields before running each step by writing temporary
-spec files (suffixed _op) into the specs/ directories. These are cleaned up on
-exit.
+When optional path overrides are supplied, the script patches the relevant yml
+fields before running each step by writing temporary spec files (suffixed _op)
+into the specs/ directories. These are cleaned up on exit.
 
 Usage (run from repo root)
 --------------------------
-    python predict/run_operational_pipeline.py \\
-        --year            2026 \\
-        --issue_date      2026-06-09 \\
-        --aifs_spec       aifs_2026 \\
-        --aifs_ens_spec   aifs_ens_2026 \\
-        --clim_spec       imd_clim_mok_date_2026 \\
-        --combine_spec    combine_template_clim_mok_date_2026 \\
-        --connect_spec    connect_clim_mok_date_2026 \\
-        --blend_spec      cv_models_clim_mok_date_2026 \\
-        --coef_dir        Monsoon_Data/results/wet_spell_aifs_aifs_ens \\
-        --coef_tag        clim_mok_date_2022_year2022 \\
-        --blend_input     Monsoon_Data/Processed_Data/2026/cv_data_clim_mok_date_new_pipeline_2026.pkl \\
-        --work_dir        Monsoon_Data/Processed_Data/2026 \\
-        [--aifs_nc_folder     /path/to/aifs/nc/files] \\
-        [--aifs_ens_nc_folder /path/to/aifs_ens/nc/files] \\
-        [--gt_path            Monsoon_Data/Processed_Data/Models/wet_spell/imd_clim_mok_date_wide.pkl] \\
-        [--map_output_path    predict/output/2026/] \\
-        [--skip_to STEP] \\
+    python predict/run_operational_pipeline.py \
+        --year            2026 \
+        --issue_date      2026-06-09 \
+        --aifs_spec       aifs_2026 \
+        --aifs_ens_spec   aifs_ens_2026 \
+        --clim_spec       imd_clim_mok_date_2026 \
+        --combine_spec    combine_template_clim_mok_date_2026 \
+        --connect_spec    connect_clim_mok_date_2026 \
+        --blend_spec      cv_models_clim_mok_date_2026 \
+        --coef_dir        Monsoon_Data/results/wet_spell_aifs_aifs_ens \
+        --coef_tag        clim_mok_date_2022_year2022 \
+        --blend_input     Monsoon_Data/Processed_Data/2026/cv_data_clim_mok_date_new_pipeline_2026.pkl \
+        --work_dir        Monsoon_Data/Processed_Data/2026 \
+        [--aifs_nc_file       /path/to/aifs/2026.nc] \
+        [--aifs_ens_nc_file   /path/to/aifs_ens/2026.nc] \
+        [--aifs_nc_folder     /path/to/aifs/nc/files] \
+        [--aifs_ens_nc_folder /path/to/aifs_ens/nc/files] \
+        [--gt_path            Monsoon_Data/Processed_Data/Models/wet_spell/imd_clim_mok_date_wide.pkl] \
+        [--map_output_path    predict/output/2026/] \
+        [--skip_to STEP] \
         [--dry_run]
 
 Notes
 -----
+--aifs_nc_file / --aifs_ens_nc_file
+    Point to a specific NetCDF file. Overrides both input.nc_folder (set to the
+    file's parent directory) and input.file_regex (set to match the exact filename)
+    in the aifs / aifs_ens yml specs. Takes priority over --aifs_nc_folder /
+    --aifs_ens_nc_folder.
+
 --aifs_nc_folder / --aifs_ens_nc_folder
-    Override the input.nc_folder field in the aifs / aifs_ens yml specs.
+    Override only input.nc_folder in the aifs / aifs_ens yml specs. The
+    file_regex from the yml is used as-is to select files within the folder.
 
 --gt_path
     Path to the historical ground truth wide pkl. Simultaneously overrides:
@@ -71,6 +79,7 @@ import shutil
 import atexit
 from datetime import datetime
 
+import re
 import yaml
 
 REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -233,6 +242,14 @@ def main():
                         help="Override input.nc_folder in the aifs spec yml")
     parser.add_argument("--aifs_ens_nc_folder", default=None,
                         help="Override input.nc_folder in the aifs_ens spec yml")
+    parser.add_argument("--aifs_nc_file", default=None,
+                        help="Path to a specific aifs NetCDF file to process. "
+                             "Overrides both input.nc_folder and input.file_regex "
+                             "in the aifs spec yml. Takes priority over --aifs_nc_folder.")
+    parser.add_argument("--aifs_ens_nc_file", default=None,
+                        help="Path to a specific aifs_ens NetCDF file to process. "
+                             "Overrides both input.nc_folder and input.file_regex "
+                             "in the aifs_ens spec yml. Takes priority over --aifs_ens_nc_folder.")
     parser.add_argument("--gt_path", default=None,
                         help="Path to historical ground truth wide pkl. Overrides "
                              "input.gt_path in the clim spec AND ground_truth_wide_rds "
@@ -267,13 +284,27 @@ def main():
     clim_spec     = args.clim_spec
     combine_spec  = args.combine_spec
 
-    if args.aifs_nc_folder:
+    if args.aifs_nc_file:
+        nc_file = os.path.abspath(args.aifs_nc_file)
+        aifs_spec = write_patched_spec(
+            args.aifs_spec, "raw_data",
+            [("input.nc_folder",  os.path.dirname(nc_file)),
+             ("input.file_regex", f"^{re.escape(os.path.basename(nc_file))}$")]
+        )
+    elif args.aifs_nc_folder:
         aifs_spec = write_patched_spec(
             args.aifs_spec, "raw_data",
             [("input.nc_folder", args.aifs_nc_folder)]
         )
 
-    if args.aifs_ens_nc_folder:
+    if args.aifs_ens_nc_file:
+        nc_file = os.path.abspath(args.aifs_ens_nc_file)
+        aifs_ens_spec = write_patched_spec(
+            args.aifs_ens_spec, "raw_data",
+            [("input.nc_folder",  os.path.dirname(nc_file)),
+             ("input.file_regex", f"^{re.escape(os.path.basename(nc_file))}$")]
+        )
+    elif args.aifs_ens_nc_folder:
         aifs_ens_spec = write_patched_spec(
             args.aifs_ens_spec, "raw_data",
             [("input.nc_folder", args.aifs_ens_nc_folder)]
@@ -363,9 +394,13 @@ def main():
     log(f"Starting operational pipeline for year={year}, issue_date={issue_date}")
     log(f"Work dir    : {work_dir}")
     log(f"Map output  : {map_out}")
-    if args.aifs_nc_folder:
+    if args.aifs_nc_file:
+        log(f"aifs nc_file override        : {args.aifs_nc_file}")
+    elif args.aifs_nc_folder:
         log(f"aifs nc_folder override      : {args.aifs_nc_folder}")
-    if args.aifs_ens_nc_folder:
+    if args.aifs_ens_nc_file:
+        log(f"aifs_ens nc_file override    : {args.aifs_ens_nc_file}")
+    elif args.aifs_ens_nc_folder:
         log(f"aifs_ens nc_folder override  : {args.aifs_ens_nc_folder}")
     if args.gt_path:
         log(f"gt_path override (clim+combine): {args.gt_path}")

@@ -320,6 +320,16 @@ def main():
             [("ground_truth_wide_rds", args.gt_path)]
         )
 
+    # Patch connect_spec input_rds to match the _op combine output basename.
+    # write_patched_spec appends _op to combine_spec, so the combine output is
+    # named <combine_spec>_op_combined_wide.pkl — the connect spec must match.
+    combine_basename = f"{combine_spec}_combined_wide.pkl"
+    connect_input_rds = os.path.join(work_dir, combine_basename)
+    connect_spec = write_patched_spec(
+        args.connect_spec, "2025_blend",
+        [("input_rds", connect_input_rds)]
+    )
+
     # ── Expected output paths ─────────────────────────────────────────────
     aifs_pkl     = os.path.join(work_dir, f"aifs_{year}_wide.pkl")
     aifs_ens_pkl = os.path.join(work_dir, f"aifs_ens_{year}_wide.pkl")
